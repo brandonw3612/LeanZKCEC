@@ -81,22 +81,28 @@ theorem tseitin_satisfiable {C : Circuit}
   (tseitin C).Satisfiable := by
   unfold CNF.Satisfiable
   let F := Function.const Variable false
-  exact ⟨C.run F, sat_tseitin.mpr hC.run_consistent⟩
+  use C.run F
+  rw [sat_tseitin]
+  exact hC.run_consistent
 
 theorem tseitin_total {C : Circuit} {ω : Assignment}
   (hC : C.WellFormed) :
   (tseitin C).ProjSat ω C.inputs.toFinset := by
   unfold CNF.ProjSat
-  refine ⟨C.run ω, sat_tseitin.mpr hC.run_consistent, ?_⟩
-  intro v hv
-  simp at hv
-  rw [hC.run_input hv]
+  use C.run ω
+  constructor
+  · rw [sat_tseitin]
+    exact hC.run_consistent
+  · intro v hv
+    simp at hv
+    rw [hC.run_input hv]
 
 theorem tseitin_functional {C : Circuit} {ω : Assignment}
   (hC : C.WellFormed) (hω : (tseitin C).Sat ω) :
   C.outputs.map ω = C.eval ω := by
   apply hC.outputs_of_consistent
-  exact sat_tseitin.mp hω
+  rw [← sat_tseitin]
+  exact hω
 
 theorem tseitin_projSat_iff {C : Circuit} {ω : Assignment}
   (hC : C.WellFormed) :
@@ -109,18 +115,21 @@ theorem tseitin_projSat_iff {C : Circuit} {ω : Assignment}
     simp [Circuit.ioVars, Set.EqOn, or_imp, forall_and] at h_eq
     obtain ⟨h_eq_in, h_eq_out⟩ := h_eq
     symm
-    rw [← List.map_inj_left.mpr h_eq_out,
-        tseitin_functional hC hω',
-        hC.eval_congr]
+    rw [← List.map_inj_left] at h_eq_out
+    rw [← h_eq_out, tseitin_functional hC hω', hC.eval_congr]
     simp_all
   · unfold Circuit.eval at h
-    refine ⟨C.run ω, sat_tseitin.mpr hC.run_consistent, ?_⟩
-    intro v hv
-    simp [Circuit.ioVars] at hv
-    rcases hv with hv | hv
-    · exact hC.run_input hv
-    · rw [List.map_inj_left.mp h]
-      exact hv
+    use C.run ω
+    constructor
+    · rw [sat_tseitin]
+      exact hC.run_consistent
+    · intro v hv
+      simp [Circuit.ioVars] at hv
+      rcases hv with hv | hv
+      · exact hC.run_input hv
+      · rw [List.map_inj_left] at h
+        symm
+        exact h v hv
 
 theorem mem_vars_tseitinGates {v : Variable}:
   ∀ {gl : GateList}, v ∈ (tseitinGates gl).vars →
@@ -150,7 +159,8 @@ theorem vars_tseitin_subset_wires {C : Circuit} (hC : C.WellFormed) :
   · unfold Circuit.WellFormed at hC
     obtain ⟨h_gwf, h_out⟩ := hC
     rcases h_gwf.arg_mem hvg' hv' with hv_in | h_gate
-    · exact Or.inl (List.mem_toFinset.mp hv_in)
+    · left
+      simp_all
     · exact Or.inr h_gate
 
 end LeanZKCEC

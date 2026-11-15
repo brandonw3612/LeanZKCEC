@@ -21,18 +21,18 @@ theorem ResolutionStep.sound {c c' r : Clause} {ω : Assignment}
   unfold Clause.Sat ResolutionStep at *
   obtain ⟨p, hc, hc'⟩ := hr
   rcases p.eval_or_eval_neg (ω := ω) with hp | hp
-  · obtain ⟨l, hl, hv⟩ := h'
+  · obtain ⟨l, hl, h_l_eval⟩ := h'
     have hl := hc' hl
     simp at hl
     rcases hl with rfl | hl
     · simp_all
-    · exact ⟨l, hl, hv⟩
-  · obtain ⟨l, hl, hv⟩ := h
+    · exact ⟨l, hl, h_l_eval⟩
+  · obtain ⟨l, hl, h_l_eval⟩ := h
     have hl := hc hl
     simp at hl
     rcases hl with rfl | hl
     · simp_all
-    · exact ⟨l, hl, hv⟩
+    · exact ⟨l, hl, h_l_eval⟩
 
 inductive Derivable (Φ : CNF) : Clause → Prop
   | input {c : Clause} : c ∈ Φ → Derivable Φ c
@@ -90,11 +90,13 @@ theorem ValidFrom.derivable {Φ : CNF} {steps : List Step} :
     obtain ⟨⟨c, c', hc, hc', r⟩, h_vf_kr⟩ := h_vf
     let h_c_der : Derivable Φ c := h_der (mem_of_getElem?_eq_some hc)
     let h_c'_der : Derivable Φ c' := h_der (mem_of_getElem?_eq_some hc')
-    rcases List.mem_cons.mp hs' with rfl | hs'
+    rw [List.mem_cons] at hs'
+    rcases hs' with rfl | hs'
     · exact Derivable.resolution h_c_der h_c'_der r
     · apply ih h_vf_kr
       · intro c hc
-        rcases List.mem_append.mp hc with hc | hc
+        rw [List.mem_append] at hc
+        rcases hc with hc | hc
         · exact h_der hc
         · rw [List.mem_singleton] at hc
           subst hc

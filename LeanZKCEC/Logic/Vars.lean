@@ -46,9 +46,9 @@ theorem sat_congr {σ τ : Assignment} {c : Clause} (h : Set.EqOn σ τ c.vars) 
   unfold Sat
   simp [Set.EqOn] at h
   constructor <;> (
-    rintro ⟨l, hl, hv⟩
+    rintro ⟨l, hl, h_l_eval⟩
     use l
-    simp_all [← hv, Literal.eval_congr (h l hl)]
+    simp_all [← h_l_eval, Literal.eval_congr (h l hl)]
   )
 
 end Clause
@@ -106,7 +106,8 @@ def glue (σ τ : Assignment) (S : VarSet) : Assignment :=
 theorem glue_eqOn_left {σ τ : Assignment} {S : VarSet} :
   Set.EqOn (glue σ τ S) σ S := by
   intro v hv
-  simp [glue, Finset.mem_coe.mp hv]
+  simp at hv
+  simp [glue, hv]
 
 theorem glue_eqOn_right {σ τ : Assignment} {S T : VarSet}
   (h : Set.EqOn σ τ (S ∩ T)) :
@@ -208,13 +209,13 @@ theorem hit_trueLiterals {ω : Assignment} {Φ : CNF} {V : VarSet}
   (h_sat : Φ.Sat ω) (hV : Φ.vars ⊆ V) :
   ∀ {c}, c ∈ Φ → ∃ l ∈ c, l ∈ trueLiterals ω V := by
   intro c hc
-  obtain ⟨l, hl, he⟩ := h_sat hc
+  obtain ⟨l, hl, h_l_eval⟩ := h_sat hc
   refine ⟨l, hl, ?_⟩
   apply mem_trueLiterals
   · apply hV
     apply CNF.mem_vars.2
     exact ⟨c, hc, Clause.vars_mem_vars hl⟩
-  · exact he
+  · exact h_l_eval
 
 def freshVar (S : VarSet) : Variable := S.sup id + 1
 

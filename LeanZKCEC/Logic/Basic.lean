@@ -104,8 +104,8 @@ theorem sat_union {ω : Assignment} {c c' : Clause} :
 theorem Sat.mono {ω : Assignment} {c c' : Clause} (h : c ⊆ c') (hc : Sat ω c) :
   Sat ω c' := by
   unfold Sat at *
-  obtain ⟨l, hl, hv⟩ := hc
-  exact ⟨l, h hl, hv⟩
+  obtain ⟨l, hl, h_l_eval⟩ := hc
+  exact ⟨l, h hl, h_l_eval⟩
 
 end Clause
 

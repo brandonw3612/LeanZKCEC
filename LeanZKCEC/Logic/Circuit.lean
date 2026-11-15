@@ -83,10 +83,12 @@ theorem GatesWellFormed.arg_mem : ∀ {gl : GateList} {V : VarSet},
     obtain ⟨v, g⟩ := p
     unfold GatesWellFormed at h_wf
     obtain ⟨h_args, hv, h_rest⟩ := h_wf
-    rcases List.mem_cons.mp hvg' with ⟨rfl, rfl⟩ | hvg'
+    rw [List.mem_cons] at hvg'
+    rcases hvg' with ⟨rfl, rfl⟩ | hvg'
     · exact Or.inl (h_args ha)
     · rcases ih h_rest hvg' ha with h | ⟨v'', g'', hvg'', hv''⟩
-      · rcases Finset.mem_insert.mp h with h_eq | h_in
+      · rw [Finset.mem_insert] at h
+        rcases h with h_eq | h_in
         · exact Or.inr ⟨v, g, List.mem_cons.mpr (Or.inl rfl), h_eq.symm⟩
         · exact Or.inl h_in
       · exact Or.inr ⟨v'', g'', List.mem_cons.mpr (Or.inr hvg''), hv''⟩
@@ -100,7 +102,8 @@ theorem GatesWellFormed.out_not_mem :
   | cons q rest ih =>
     unfold GatesWellFormed at h_wf
     obtain ⟨h_args, hv, h_rest⟩ := h_wf
-    rcases List.mem_cons.mp hvg with rfl | hp
+    rw [List.mem_cons] at hvg
+    rcases hvg with rfl | hp
     · exact hv
     · intro hp'
       apply ih h_rest hp
@@ -121,7 +124,8 @@ theorem GatesWellFormed.runGates_consistent :
       unfold GatesConsistent
       intro v' g' hvg'
       simp [runGates]
-      rcases List.mem_cons.mp hvg' with ⟨rfl, rfl⟩ | hvg'
+      rw [List.mem_cons] at hvg'
+      rcases hvg' with ⟨rfl, rfl⟩ | hvg'
       · have hl : runGates rest (Function.update ω v (g.eval ω)) v
                 = g.eval ω := by
           rw [runGates_frame]
@@ -166,11 +170,13 @@ theorem GatesWellFormed.consistent_unique :
       have hσ : GatesConsistent σ rest := (GatesConsistent.cons.mp hσ).right
       have hτ : GatesConsistent τ rest := (GatesConsistent.cons.mp hτ).right
       intro v' g' hvg'
-      rcases List.mem_cons.mp hvg' with ⟨rfl, rfl⟩ | hvg'
+      rw [List.mem_cons] at hvg'
+      rcases hvg' with ⟨rfl, rfl⟩ | hvg'
       · exact h_eq'
       · apply ih h_rest hσ hτ ?_ hvg'
         intro v hv
-        rcases Finset.mem_insert.mp hv with rfl | hv
+        rw [Finset.mem_insert] at hv
+        rcases hv with rfl | hv
         · exact h_eq'
         · exact h_eq hv
 
@@ -260,7 +266,8 @@ theorem WellFormed.consistent_eq_run
       GatesWellFormed.runGates_consistent h_gwf
     apply h_gwf.consistent_unique h_run hω ?_ hvg
     intro v hv
-    exact hC.run_input (List.mem_toFinset.mp hv)
+    apply hC.run_input
+    simp_all
 
 theorem WellFormed.outputs_of_consistent {C : Circuit} {ω : Assignment}
   (hC : C.WellFormed) (hω : C.Consistent ω) :
