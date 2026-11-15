@@ -154,15 +154,15 @@ theorem ProjSat.congr {Φ : CNF} {σ τ : Assignment} {S : VarSet}
 
 end CNF
 
-def Consistent (S : LitSet) : Prop := ∀ {l}, l ∈ S → l.neg ∉ S
+def LitSet.Consistent (S : LitSet) : Prop := ∀ {l}, l ∈ S → l.neg ∉ S
 
 def toAssignment (S : LitSet) : Assignment :=
   fun v => decide (Literal.ofVar v ∈ S)
 
 theorem eval_toAssignment {S : LitSet} {l : Literal}
-  (hS : Consistent S) (hl : l ∈ S) :
+  (hS : S.Consistent) (hl : l ∈ S) :
   l.eval (toAssignment S) := by
-  unfold Consistent at hS
+  unfold LitSet.Consistent at hS
   obtain ⟨v, p⟩ := l
   cases p with simp [Literal.eval, toAssignment]
   | true => simp_all [Literal.ofVar]
@@ -172,7 +172,7 @@ theorem eval_toAssignment {S : LitSet} {l : Literal}
     exact hS
 
 theorem CNF.sat_toAssignment {S : LitSet} {Φ : CNF}
-  (hS : Consistent S) (h_hit : ∀ {c}, c ∈ Φ → ∃ l ∈ c, l ∈ S) :
+  (hS : S.Consistent) (h_hit : ∀ {c}, c ∈ Φ → ∃ l ∈ c, l ∈ S) :
   Φ.Sat (toAssignment S) := by
   intro c hc
   obtain ⟨l, hlc, hls⟩ := h_hit hc
@@ -180,7 +180,7 @@ theorem CNF.sat_toAssignment {S : LitSet} {Φ : CNF}
   exact ⟨l, hlc, eval_toAssignment hS hls⟩
 
 theorem CNF.satisfiable_of_hitting {S : LitSet} {Φ : CNF}
-  (hS : Consistent S) (h_hit : ∀ {c}, c ∈ Φ → ∃ l ∈ c, l ∈ S) :
+  (hS : S.Consistent) (h_hit : ∀ {c}, c ∈ Φ → ∃ l ∈ c, l ∈ S) :
   Φ.Satisfiable := by
   unfold CNF.Satisfiable
   exact ⟨_, sat_toAssignment hS h_hit⟩
@@ -189,8 +189,8 @@ def trueLiterals (ω : Assignment) (V : VarSet) : LitSet :=
   V.image fun v => ⟨v, ω v⟩
 
 theorem consistent_trueLiterals (ω : Assignment) (V : VarSet) :
-  Consistent (trueLiterals ω V) := by
-  unfold Consistent trueLiterals
+  (trueLiterals ω V).Consistent := by
+  unfold LitSet.Consistent trueLiterals
   intro l hl
   simp_all [Finset.mem_image]
   obtain ⟨u, hu, rfl⟩ := hl
