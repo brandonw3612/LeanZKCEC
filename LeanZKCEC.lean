@@ -6,3 +6,5 @@ import LeanZKCEC.Logic.Resolution
 import LeanZKCEC.Logic.Circuit
 import LeanZKCEC.Logic.Tseitin
 import LeanZKCEC.Logic.Miter
+
+import LeanZKCEC.Blueprint.Projection
