@@ -54,7 +54,8 @@ theorem diffGates_wellformed {base : Variable} :
             apply Finset.mem_insert_of_mem
             tauto
           · intro k hk' h_mem
-            rcases Finset.mem_insert.mp h_mem with h_mem | h_mem
+            rw [Finset.mem_insert] at h_mem
+            rcases h_mem with h_mem | h_mem
             · simp_all
               omega
             · exact hk (by omega) h_mem
@@ -87,40 +88,240 @@ theorem outLiterals_sat_iff {ω : Assignment} {base : Variable} :
         simp [Literal.eval, g, Gate.eval, h_gc', hs, ht]
       unfold outLiterals
       constructor
-      · rintro ⟨l, ⟨hl, h_lv⟩⟩ h_eq
+      · rintro ⟨l, hl, h_l_eval⟩ h_eq
         simp only [List.map_cons, List.cons.injEq] at h_eq
         obtain ⟨h_eq_h, h_eq_t⟩ := h_eq
-        rcases List.mem_cons.mp hl with rfl | hl
-        · exact h_neq.mp h_lv h_eq_h
-        · exact ih'.mp ⟨l, ⟨hl, h_lv⟩⟩ h_eq_t
+        rw [List.mem_cons] at hl
+        rcases hl with rfl | hl
+        · exact h_neq.mp h_l_eval h_eq_h
+        · exact ih'.mp ⟨l, hl, h_l_eval⟩ h_eq_t
       · intro h_neq'
         by_cases h_eq_h : ω s = ω t
         · have h_neq_t : ss.map ω ≠ ts.map ω := by
             intro h_eq_t
             apply h_neq'
             simp [h_eq_h, h_eq_t]
-          obtain ⟨l, ⟨hl, h_lv⟩⟩ := ih'.mpr h_neq_t
-          refine ⟨l, ?_, h_lv⟩
+          rw [← ih'] at h_neq_t
+          obtain ⟨l, hl, h_l_eval⟩ := h_neq_t
+          refine ⟨l, ?_, h_l_eval⟩
           simp [hl]
-        · refine ⟨⟨base + i, true⟩, ?_, h_neq.mpr h_eq_h⟩
+        · rw [← ne_eq, ← h_neq] at h_eq_h
+          refine ⟨⟨base + i, true⟩, ?_, h_eq_h⟩
           simp
 
 namespace Miter
 
-def base (spec impl : Circuit) : Variable :=
-  freshVar (spec.wires ∪ impl.wires)
+structure Interface where
+  spec : Circuit
+  implOutputs : VarList
 
-def ioGates (spec impl : Circuit) : GateList :=
-  diffGates (base spec impl) 0 spec.outputs impl.outputs
+namespace Interface
 
-def outClause (spec impl : Circuit) : Clause :=
-  (outLiterals (base spec impl) 0 spec.outputs impl.outputs).toFinset
+def ioVars (I : Interface) : VarSet :=
+  I.spec.inputs.toFinset ∪ I.implOutputs.toFinset
 
-def Φio (spec impl : Circuit) : CNF :=
-  tseitinGates (ioGates spec impl)
+def knownVars (I : Interface) : VarSet :=
+  I.spec.wires ∪ I.implOutputs.toFinset
+
+def base (I : Interface) : Variable :=
+  freshVar (I.knownVars)
+
+def ioGates (I : Interface) : GateList :=
+  diffGates (I.base) 0 I.spec.outputs I.implOutputs
+
+def outClause (I : Interface) : Clause :=
+  (outLiterals I.base 0 I.spec.outputs I.implOutputs).toFinset
+
+def Φio (I : Interface) : CNF :=
+  tseitinGates (I.ioGates)
+
+def Φpub (I : Interface) : CNF :=
+  tseitin I.spec ∪ I.Φio ∪ {I.outClause}
+
+def witness (I : Interface) (ω : Assignment) : Assignment :=
+  runGates (I.ioGates) (I.spec.run ω)
+
+structure WellFormed (I : Interface) : Prop where
+  spec_wellformed : I.spec.WellFormed
+  outputs_len : I.spec.outputs.length = I.implOutputs.length
+  outputs_fresh : ∀ {v},
+                    v ∈ I.implOutputs → v ∈ I.spec.wires → v ∈ I.spec.inputs
+
+variable {I : Interface}
+
+theorem ne_of_sat_pub {ω : Assignment}
+  (hI : I.WellFormed) (hω : I.Φpub.Sat ω) :
+  I.implOutputs.map ω ≠ I.spec.eval ω := by
+  simp [Φpub, CNF.sat_union] at hω
+  obtain ⟨h_out, h_spec, h_io⟩ := hω
+  have h_io_cons : GatesConsistent ω I.ioGates := sat_tseitinGates.mp h_io
+  unfold ioGates at h_io_cons
+  set outLits := outLiterals I.base 0 I.spec.outputs I.implOutputs
+  have h_ex : ∃ l ∈ outLits, l.eval ω := by
+    unfold outClause Clause.Sat at h_out
+    obtain ⟨l, hl, h_l_eval⟩ := h_out
+    rw [List.mem_toFinset] at hl
+    exact ⟨l, hl, h_l_eval⟩
+  rw [outLiterals_sat_iff h_io_cons hI.outputs_len,
+      tseitin_functional hI.spec_wellformed h_spec] at h_ex
+  exact h_ex.symm
+
+theorem base_add_not_mem {k : ℕ} :
+  I.base + k ∉ I.knownVars := by
+  intro h_mem
+  have h_mem := lt_freshVar h_mem
+  unfold base freshVar at h_mem
+  exact Nat.not_lt_of_le (Nat.le_add_right _ k) h_mem
+
+theorem ioGates_frame {ω : Assignment} {v : Variable}
+  (hv : v ∈ I.knownVars) :
+  runGates I.ioGates ω v = ω v := by
+  apply runGates_frame
+  intro v' g' hvg' h_eq
+  unfold ioGates at hvg'
+  have ⟨k, hk, h_kv'⟩ := diffGates_out hvg'
+  apply base_add_not_mem (I := I) (k := k)
+  rw [← h_kv', h_eq]
+  exact hv
+
+theorem spec_run_implOutput {ω : Assignment} {v : Variable}
+  (hI : I.WellFormed) (hv : v ∈ I.implOutputs) :
+  I.spec.run ω v = ω v := by
+  by_cases hv' : v ∈ I.spec.inputs
+  · exact hI.spec_wellformed.run_input hv'
+  · unfold Circuit.run
+    apply runGates_frame
+    intro v' g' hvg' h_eq
+    apply hv'
+    apply hI.outputs_fresh hv
+    rw [← h_eq, Circuit.mem_wires]
+    exact Or.inr ⟨v', g', hvg', rfl⟩
+
+theorem ioGates_wellformed
+  (hI : I.WellFormed) :
+  GatesWellFormed I.knownVars I.ioGates := by
+  unfold ioGates
+  apply diffGates_wellformed
+  · intro v hv
+    simp_all [knownVars, hI.spec_wellformed.right]
+  · intro v hv
+    simp_all [knownVars]
+  · intro k hk
+    exact base_add_not_mem
+
+theorem witness_eqOn_io {ω : Assignment}
+  (hI : I.WellFormed) :
+  Set.EqOn (I.witness ω) ω I.ioVars := by
+  intro v hv
+  simp [ioVars] at hv
+  unfold witness
+  rcases hv with hv | hv
+  · have h_known : v ∈ I.knownVars := by
+      unfold knownVars
+      apply Finset.mem_union_left
+      apply Circuit.mem_wires.mpr
+      simp [Circuit.IsWire, hv]
+    rw [ioGates_frame h_known, hI.spec_wellformed.run_input hv]
+  · have h_known : v ∈ I.knownVars := by
+      unfold knownVars
+      apply Finset.mem_union_right
+      simp [hv]
+    rw [ioGates_frame h_known, spec_run_implOutput hI hv]
+
+theorem witness_sat_pub {ω : Assignment}
+  (hI : I.WellFormed) (h_neq : I.implOutputs.map ω ≠ I.spec.eval ω) :
+  I.Φpub.Sat (I.witness ω) := by
+  have h_eq : Set.EqOn (I.witness ω) (I.spec.run ω) (tseitin I.spec).vars := by
+      intro v hv
+      unfold witness
+      apply ioGates_frame
+      apply Finset.mem_union_left
+      apply vars_tseitin_subset_wires hI.spec_wellformed
+      simp_all
+  have h_spec : (tseitin I.spec).Sat (I.witness ω) := by
+    rw [CNF.sat_congr h_eq, sat_tseitin]
+    exact hI.spec_wellformed.run_consistent
+  have h_io_cons : GatesConsistent (I.witness ω) I.ioGates := by
+    unfold witness
+    exact (ioGates_wellformed hI).runGates_consistent
+  have h_spec_out : I.spec.outputs.map (I.witness ω) = I.spec.eval ω := by
+    unfold Circuit.eval
+    rw [List.map_inj_left]
+    intro v hv
+    unfold witness
+    apply ioGates_frame
+    simp_all [knownVars, hI.spec_wellformed.right]
+  have h_impl_out : I.implOutputs.map (I.witness ω) = I.implOutputs.map ω := by
+    unfold witness
+    rw [List.map_inj_left]
+    intro v hv
+    apply witness_eqOn_io hI
+    simp_all [ioVars]
+  have h_neq' : I.spec.outputs.map (I.witness ω) ≠
+                I.implOutputs.map (I.witness ω) := by
+    rw [h_spec_out, h_impl_out]
+    exact h_neq.symm
+  have h_out : I.outClause.Sat (I.witness ω) := by
+    unfold ioGates at h_io_cons
+    rw [← outLiterals_sat_iff h_io_cons hI.outputs_len] at h_neq'
+    obtain ⟨l, hl, h_l_eval⟩ := h_neq'
+    rw [← List.mem_toFinset] at hl
+    unfold outClause Clause.Sat
+    exact ⟨l, hl, h_l_eval⟩
+  simp [Φpub, CNF.sat_union, Φio]
+  rw [← sat_tseitinGates] at h_io_cons
+  exact ⟨h_out, h_spec, h_io_cons⟩
+
+theorem outputs_of_unsat {Φ : CNF} {ω : Assignment}
+  (hI : I.WellFormed) (h_vars : Φ.vars ∩ I.Φpub.vars ⊆ I.ioVars)
+  (hω : Φ.Sat ω) (h_unsat : (I.Φpub ∪ Φ).Unsatisfiable) :
+  I.implOutputs.map ω = I.spec.eval ω := by
+  by_contra h_neq
+  have h_pub : I.Φpub.Sat (I.witness ω) := witness_sat_pub hI h_neq
+  have h_eq : Set.EqOn (I.witness ω) ω (I.Φpub.vars ∩ Φ.vars) := by
+    intro v hv
+    rw [← Finset.coe_inter, Finset.mem_coe, Finset.inter_comm] at hv
+    apply witness_eqOn_io hI
+    rw [Finset.mem_coe]
+    exact Finset.mem_of_subset h_vars hv
+  rw [CNF.unsat_iff] at h_unsat
+  apply h_unsat (ω := (I.witness ω).glue ω I.Φpub.vars)
+  exact CNF.sat_union_glue h_pub hω h_eq
+
+theorem unsat_of_outputs {Φ : CNF}
+  (hI : I.WellFormed)
+  (h : ∀ {ω}, Φ.Sat ω → I.implOutputs.map ω = I.spec.eval ω) :
+  (I.Φpub ∪ Φ).Unsatisfiable := by
+  rw [CNF.unsat_iff]
+  intro ω hω
+  rw [CNF.sat_union] at hω
+  obtain ⟨h_sat_pub, h_sat_Φ⟩ := hω
+  exact ne_of_sat_pub hI h_sat_pub (h h_sat_Φ)
+
+theorem unsat_iff_outputs {Φ : CNF}
+  (hI : I.WellFormed) (h_vars : Φ.vars ∩ I.Φpub.vars ⊆ I.ioVars) :
+  (I.Φpub ∪ Φ).Unsatisfiable ↔
+  ∀ {ω}, Φ.Sat ω → I.implOutputs.map ω = I.spec.eval ω := by
+  constructor
+  · intro h_unsat ω hω
+    exact outputs_of_unsat hI h_vars hω h_unsat
+  · intro h_eq
+    exact unsat_of_outputs hI h_eq
+
+def ofCircuits (spec impl : Circuit) : Interface := ⟨spec, impl.outputs⟩
+
+@[simp]
+theorem ofCircuits_spec {spec impl : Circuit} :
+  (ofCircuits spec impl).spec = spec := rfl
+
+@[simp]
+theorem ofCircuits_implOutputs {spec impl : Circuit} :
+  (ofCircuits spec impl).implOutputs = impl.outputs := rfl
+
+end Interface
 
 def Φpub (spec impl : Circuit) : CNF :=
-  tseitin spec ∪ Φio spec impl ∪ {outClause spec impl}
+  (Interface.ofCircuits spec impl).Φpub
 
 def Φsec (impl : Circuit) : CNF :=
   tseitin impl
@@ -129,167 +330,44 @@ def Φmiter (spec impl : Circuit) : CNF :=
   Φpub spec impl ∪ Φsec impl
 
 structure Compatible (spec impl : Circuit) : Prop where
-  spec_wellformed : spec.WellFormed
+  interface_wellformed : (Interface.ofCircuits spec impl).WellFormed
   impl_wellformed : impl.WellFormed
   inputs_eq : spec.inputs = impl.inputs
-  outputs_len : spec.outputs.length = impl.outputs.length
-  shared : ∀ {v}, v ∈ spec.wires → v ∈ impl.wires → v ∈ spec.inputs
+  isolated : (tseitin impl).vars ∩ (Interface.ofCircuits spec impl).Φpub.vars ⊆
+             (Interface.ofCircuits spec impl).ioVars
 
 variable {spec impl : Circuit}
 
-theorem unsat_of_equiv (h : Compatible spec impl) (h_eq : spec.Equiv impl) :
-  CNF.Unsatisfiable (Φmiter spec impl) := by
-  rw [CNF.unsat_iff]
+theorem unsat_of_equiv (hC : Compatible spec impl) (h_eq : spec.Equiv impl) :
+  (Φmiter spec impl).Unsatisfiable := by
+  unfold Φmiter Φpub Φsec
+  rw [Interface.unsat_iff_outputs hC.interface_wellformed hC.isolated]
   intro ω hω
-  simp [Φmiter, CNF.sat_union, outClause, Clause.Sat, Φpub, Φio, Φsec] at hω
-  obtain ⟨h_out, h_spec, h_io, h_impl⟩ := hω
-  have h_spec_f := tseitin_functional h.spec_wellformed h_spec
-  have h_impl_f := tseitin_functional h.impl_wellformed h_impl
-  set iog := ioGates spec impl
-  have h_io_sat : GatesConsistent ω iog := (sat_tseitinGates).mp h_io
-  have h_neq := (outLiterals_sat_iff h_io_sat h.outputs_len).mp h_out
-  apply h_neq
-  rw [h_spec_f, h_impl_f, h_eq]
-
-theorem base_add_not_mem {spec impl : Circuit} {k : ℕ} :
-  base spec impl + k ∉ spec.wires ∪ impl.wires := by
-  intro h_mem
-  have h_mem := lt_freshVar h_mem
-  unfold base freshVar at h_mem
-  exact Nat.not_lt_of_le (Nat.le_add_right _ k) h_mem
-
-theorem run_io_frame {spec impl : Circuit} {ω : Assignment} {v : Variable}
-  (hv : v ∈ spec.wires ∪ impl.wires) :
-  runGates (ioGates spec impl) ω v = ω v := by
-  apply runGates_frame
-  intro v' g' hvg' h_eq
-  unfold ioGates at hvg'
-  have ⟨k, hk, h_kv'⟩ := diffGates_out hvg'
-  apply base_add_not_mem (spec := spec) (impl := impl) (k := k)
-  rw [← h_kv', h_eq]
-  exact hv
-
-theorem impl_frame {ω : Assignment} {v : Variable}
-  (hC : Compatible spec impl) (hv : v ∈ spec.wires) :
-  impl.run ω v = ω v := by
-  unfold Circuit.run
-  apply runGates_frame
-  intro v' g' hvg' h_eq
-  apply hC.impl_wellformed.left.out_not_mem hvg'
-  rw [h_eq, List.mem_toFinset, ← hC.inputs_eq]
-  apply hC.shared hv
-  rw [← h_eq, Circuit.mem_wires]
-  exact Or.inr ⟨v', g', hvg', rfl⟩
-
-def witness (spec impl : Circuit) (ω : Assignment) : Assignment :=
-  runGates (ioGates spec impl) (impl.run (spec.run ω))
-
-theorem witness_spec {ω : Assignment} {v : Variable}
-  (hC : Compatible spec impl) (hv : v ∈ spec.wires) :
-  witness spec impl ω v = spec.run ω v := by
-  unfold witness
-  rw [run_io_frame (spec := spec) (impl := impl) (Finset.mem_union_left _ hv),
-      impl_frame hC hv]
-
-theorem witness_impl {ω : Assignment} {v : Variable}
-  (hv : v ∈ impl.wires) :
-  witness spec impl ω v = impl.run (spec.run ω) v := by
-  unfold witness
-  rw [run_io_frame (spec := spec) (impl := impl) (Finset.mem_union_right _ hv)]
-
-theorem witness_sat_spec {ω : Assignment}
-  (hC : Compatible spec impl) :
-  (tseitin spec).Sat (witness spec impl ω) := by
-  set wn := witness spec impl ω
-  have h_eq : Set.EqOn wn (spec.run ω) (tseitin spec).vars := by
-    intro v hv
-    apply witness_spec hC
-    apply vars_tseitin_subset_wires hC.spec_wellformed
-    simp_all
-  rw [CNF.sat_congr h_eq]
-  exact sat_tseitin.mpr hC.spec_wellformed.run_consistent
-
-theorem witness_sat_impl {ω : Assignment}
-  (hC : Compatible spec impl) :
-  (tseitin impl).Sat (witness spec impl ω) := by
-  set wn := witness spec impl ω
-  have h_eq : Set.EqOn wn (impl.run (spec.run ω)) (tseitin impl).vars := by
-    intro v hv
-    apply witness_impl
-    apply vars_tseitin_subset_wires hC.impl_wellformed
-    simp_all
-  rw [CNF.sat_congr h_eq]
-  exact sat_tseitin.mpr hC.impl_wellformed.run_consistent
-
-theorem ioGates_wellformed (hC : Compatible spec impl) :
-  GatesWellFormed (spec.wires ∪ impl.wires) (ioGates spec impl) := by
-  unfold ioGates
-  apply diffGates_wellformed
-  · intro v hv
-    simp_all [hC.spec_wellformed.right]
-  · intro v hv
-    simp_all [hC.impl_wellformed.right]
-  · intro k hk
-    exact base_add_not_mem
-
-theorem witness_io_consistent {ω : Assignment}
-  (hC : Compatible spec impl) :
-  GatesConsistent (witness spec impl ω) (ioGates spec impl) := by
-  unfold witness
-  exact (ioGates_wellformed hC).runGates_consistent
+  simp [tseitin_functional hC.impl_wellformed hω]
+  exact h_eq.symm
 
 theorem equiv_of_unsat (hC : Compatible spec impl)
   (h_unsat : (Φmiter spec impl).Unsatisfiable) :
   spec.Equiv impl := by
+  unfold Φmiter Φpub Φsec at h_unsat
+  simp [Interface.unsat_iff_outputs hC.interface_wellformed hC.isolated] at h_unsat
   unfold Circuit.Equiv
-  by_contra h_neq
-  push Not at h_neq
-  obtain ⟨ω, hω⟩ := h_neq
-  set wn := witness spec impl ω
-  set iog := ioGates spec impl
-  have h_spec : spec.outputs.map wn = spec.eval ω := by
-    unfold Circuit.eval
-    rw [List.map_inj_left]
+  intro ω
+  have h_sat_run : (tseitin impl).Sat (impl.run ω) :=
+    sat_tseitin.mpr hC.impl_wellformed.run_consistent
+  have h_out := h_unsat h_sat_run
+  have h_in : ∀ {v}, v ∈ spec.inputs → impl.run ω v = ω v := by
     intro v hv
-    apply witness_spec hC
-    rw [Circuit.mem_wires]
-    exact hC.spec_wellformed.right hv
-  have h_impl : impl.outputs.map wn = impl.eval (spec.run ω) := by
-    unfold Circuit.eval
-    rw [List.map_inj_left]
-    intro v hv
-    apply witness_impl
-    rw [Circuit.mem_wires]
-    exact hC.impl_wellformed.right hv
-  have h_impl : impl.outputs.map wn = impl.eval ω := by
-    rw [h_impl]
-    apply hC.impl_wellformed.eval_congr
-    intro v hv
-    apply hC.spec_wellformed.run_input
-    rw [hC.inputs_eq]
-    exact hv
-  have h_neq' : spec.outputs.map wn ≠ impl.outputs.map wn := by
-    rw [h_spec, h_impl]
-    exact hω
-  have h_wn_io : GatesConsistent wn iog := witness_io_consistent hC
-  have h_out : (outClause spec impl).Sat wn := by
-    unfold iog ioGates at h_wn_io
-    obtain ⟨l, hl, h_l_eq⟩ :=
-      (outLiterals_sat_iff h_wn_io hC.outputs_len).mpr h_neq'
-    unfold outClause Clause.Sat
-    exact ⟨l, List.mem_toFinset.mpr hl, h_l_eq⟩
-  have h_io : (Φio spec impl).Sat wn := by
-    unfold Φio
-    apply (sat_tseitinGates).mpr
-    exact witness_io_consistent hC
-  have h_sat : (Φmiter spec impl).Sat wn := by
-    simp [Φmiter, CNF.sat_union, Φpub, Φsec]
-    exact ⟨h_out, ⟨witness_sat_spec hC, ⟨h_io, witness_sat_impl hC⟩⟩⟩
-  exact CNF.unsat_iff.mp h_unsat h_sat
+    rw [hC.inputs_eq] at hv
+    exact hC.impl_wellformed.run_input hv
+  have h := hC.interface_wellformed.spec_wellformed.eval_congr h_in
+  simp at h h_out
+  rw [← h]
+  exact h_out.symm
 
 theorem miter_correct (hC : Compatible spec impl) :
-  (Φmiter spec impl).Unsatisfiable ↔ spec.Equiv impl :=
-  ⟨equiv_of_unsat hC, unsat_of_equiv hC⟩
+  (Φmiter spec impl).Unsatisfiable ↔ spec.Equiv impl := by
+  exact ⟨equiv_of_unsat hC, unsat_of_equiv hC⟩
 
 end Miter
 
